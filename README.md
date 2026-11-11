@@ -51,18 +51,25 @@ Adding a channel is a config change, not a code change.
 | `body` | no | `''` | Markdown body, `full` channels only |
 | `url` | no | `''` | Link added for every channel |
 | `config` | yes | | Apprise config; empty skips the run |
+| `attempts` | no | `3` | Tries per channel before it counts as failed |
+| `retry-delay` | no | `10` | Seconds before the first retry; doubles after each try (10, 20, …) |
 | `apprise-version` | no | pinned | Apprise version from PyPI |
 
-Output `failed`: the tags whose channels rejected the message (empty on success).
+Output `failed`: the tags with at least one channel that failed every attempt (empty on success).
 
 ## Behaviour
 
 - Empty `config`: the step succeeds and the run summary says "Skipped".
-- A tag with no channels is reported as "no channels", not as an error.
-- Any failed tag fails the step after all tags were tried. Run the step in its
-  own job, or with `continue-on-error`, if it must not fail your pipeline.
-- A rerun sends to every channel again, including those that already succeeded.
-- The config is written to a `0600` file in `$RUNNER_TEMP` and removed at the end.
+- Each channel (config line) is sent on its own and retried on its own, with
+  exponential backoff, so a flaky network or a blocked host gets more tries
+  and a channel that already received the message never gets it twice.
+- The run summary has one row per channel: tag, service, result and the
+  attempt that worked. URLs and tokens are never printed.
+- Any failed channel fails the step after all channels were tried. Run the
+  step in its own job, or with `continue-on-error`, if it must not fail your pipeline.
+- A rerun of the step sends to every channel again.
+- Each channel's URL is written to a `0600` file in `$RUNNER_TEMP` and removed at the end;
+  URLs never appear on a command line.
 - Uses `uvx` when the runner has it; otherwise installs `uv` with `astral-sh/setup-uv`.
 
 ## License

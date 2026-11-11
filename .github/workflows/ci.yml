@@ -28,9 +28,16 @@ jobs:
         run: |
           cat > "$RUNNER_TEMP/receiver.py" <<'EOF'
           import http.server, sys
+          seen = set()
           class H(http.server.BaseHTTPRequestHandler):
               def do_POST(self):
                   data = self.rfile.read(int(self.headers['Content-Length']))
+                  # /flaky* answers 500 once, then accepts: exercises the retry.
+                  if self.path.startswith('/flaky') and self.path not in seen:
+                      seen.add(self.path)
+                      self.send_response(500)
+                      self.end_headers()
+                      return
                   with open(sys.argv[1], 'ab') as f:
                       f.write(self.path.encode() + b' ' + data + b'\n')
                   self.send_response(200)
@@ -49,8 +56,10 @@ jobs:
             ## New
             - A thing
           url: https://example.com/changelog#v1.2.0
+          retry-delay: '1'
           config: |
             full=json://127.0.0.1:8765/full
+            full=json://127.0.0.1:8765/flaky
             short=json://127.0.0.1:8765/short
 
       - name: Skip without config
@@ -65,6 +74,8 @@ jobs:
         uses: ./
         with:
           title: Dead
+          attempts: '2'
+          retry-delay: '1'
           config: full=json://127.0.0.1:9/dead
 
       - name: Check what arrived
@@ -76,6 +87,8 @@ jobs:
           cat "$RUNNER_TEMP/got.log"
           grep -q '^/full .*"title": "Example 1.2.0".*A thing.*example.com/changelog#v1.2.0' "$RUNNER_TEMP/got.log"
           grep -q '^/short .*"message": "https://example.com/changelog#v1.2.0"' "$RUNNER_TEMP/got.log"
-          [ "$(wc -l < "$RUNNER_TEMP/got.log")" -eq 2 ]
+          grep -q '^/flaky .*"title": "Example 1.2.0"' "$RUNNER_TEMP/got.log"
+          # Each channel got the message exactly once, the flaky one after a retry.
+          [ "$(wc -l < "$RUNNER_TEMP/got.log")" -eq 3 ]
           [ "$OK_FAILED" = "" ]
           [ "$DEAD_OUTCOME" = failure ] && [ "$DEAD_FAILED" = full ]

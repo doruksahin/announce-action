@@ -25,6 +25,14 @@ inputs:
       Apprise TEXT config, one `tag=url` line per channel, for example
       `full=discord://id/token`. Pass it from a secret. Empty skips the run.
     required: true
+  attempts:
+    description: Tries per channel before it counts as failed.
+    required: false
+    default: '3'
+  retry-delay:
+    description: Seconds before the first retry; doubles after each failed try.
+    required: false
+    default: '10'
   apprise-version:
     description: Apprise version from PyPI.
     required: false
@@ -59,4 +67,6 @@ runs:
         BODY: ${{ inputs.body }}
         URL: ${{ inputs.url }}
         APPRISE_VERSION: ${{ inputs.apprise-version }}
+        ATTEMPTS: ${{ inputs.attempts }}
+        RETRY_DELAY: ${{ inputs.retry-delay }}
       run: "${GITHUB_ACTION_PATH}/send.sh"
