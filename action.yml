@@ -1,0 +1,62 @@
+name: Announce
+description: >-
+  Send one announcement (title, Markdown body, link) to every channel in an
+  Apprise config. Channels tagged `full` get the whole message; channels
+  tagged `short` get the title and the link.
+author: doruksahin
+branding:
+  icon: bell
+  color: blue
+
+inputs:
+  title:
+    description: Announcement title.
+    required: true
+  body:
+    description: Announcement body in Markdown. Sent only to `full` channels.
+    required: false
+    default: ''
+  url:
+    description: Link appended to the message for every channel.
+    required: false
+    default: ''
+  config:
+    description: >-
+      Apprise TEXT config, one `tag=url` line per channel, for example
+      `full=discord://id/token`. Pass it from a secret. Empty skips the run.
+    required: true
+  apprise-version:
+    description: Apprise version from PyPI.
+    required: false
+    # renovate: datasource=pypi depName=apprise
+    default: '2.1.0'
+
+outputs:
+  failed:
+    description: Space-separated tags whose channels rejected the message; empty when all succeeded.
+    value: ${{ steps.send.outputs.failed }}
+
+runs:
+  using: composite
+  steps:
+    - id: check
+      shell: bash
+      env:
+        CONFIG: ${{ inputs.config }}
+      run: |
+        [ -n "$CONFIG" ] && echo "configured=true" >> "$GITHUB_OUTPUT" || echo "configured=false" >> "$GITHUB_OUTPUT"
+        command -v uvx >/dev/null && echo "uv=true" >> "$GITHUB_OUTPUT" || echo "uv=false" >> "$GITHUB_OUTPUT"
+
+    - if: steps.check.outputs.configured == 'true' && steps.check.outputs.uv != 'true'
+      uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+
+    - id: send
+      shell: bash
+      env:
+        CONFIGURED: ${{ steps.check.outputs.configured }}
+        CONFIG: ${{ inputs.config }}
+        TITLE: ${{ inputs.title }}
+        BODY: ${{ inputs.body }}
+        URL: ${{ inputs.url }}
+        APPRISE_VERSION: ${{ inputs.apprise-version }}
+      run: "${GITHUB_ACTION_PATH}/send.sh"

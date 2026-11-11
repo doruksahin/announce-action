@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: actionlint
+        run: |
+          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12
+          ./actionlint -color
+      - name: shellcheck
+        run: shellcheck send.sh
+
+  self-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Start a local receiver
+        run: |
+          cat > "$RUNNER_TEMP/receiver.py" <<'EOF'
+          import http.server, sys
+          class H(http.server.BaseHTTPRequestHandler):
+              def do_POST(self):
+                  data = self.rfile.read(int(self.headers['Content-Length']))
+                  with open(sys.argv[1], 'ab') as f:
+                      f.write(self.path.encode() + b' ' + data + b'\n')
+                  self.send_response(200)
+                  self.end_headers()
+          http.server.HTTPServer(('127.0.0.1', 8765), H).serve_forever()
+          EOF
+          python3 -I "$RUNNER_TEMP/receiver.py" "$RUNNER_TEMP/got.log" &
+          sleep 1
+
+      - name: Announce to full and short channels
+        id: ok
+        uses: ./
+        with:
+          title: Example 1.2.0
+          body: |
+            ## New
+            - A thing
+          url: https://example.com/changelog#v1.2.0
+          config: |
+            full=json://127.0.0.1:8765/full
+            short=json://127.0.0.1:8765/short
+
+      - name: Skip without config
+        uses: ./
+        with:
+          title: Skipped
+          config: ''
+
+      - name: Report a dead channel
+        id: dead
+        continue-on-error: true
+        uses: ./
+        with:
+          title: Dead
+          config: full=json://127.0.0.1:9/dead
+
+      - name: Check what arrived
+        env:
+          DEAD_OUTCOME: ${{ steps.dead.outcome }}
+          DEAD_FAILED: ${{ steps.dead.outputs.failed }}
+          OK_FAILED: ${{ steps.ok.outputs.failed }}
+        run: |
+          cat "$RUNNER_TEMP/got.log"
+          grep -q '^/full .*"title": "Example 1.2.0".*A thing.*example.com/changelog#v1.2.0' "$RUNNER_TEMP/got.log"
+          grep -q '^/short .*"message": "https://example.com/changelog#v1.2.0"' "$RUNNER_TEMP/got.log"
+          [ "$(wc -l < "$RUNNER_TEMP/got.log")" -eq 2 ]
+          [ "$OK_FAILED" = "" ]
+          [ "$DEAD_OUTCOME" = failure ] && [ "$DEAD_FAILED" = full ]
